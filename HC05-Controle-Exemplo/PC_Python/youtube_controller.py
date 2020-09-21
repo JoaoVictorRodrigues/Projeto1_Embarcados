@@ -7,7 +7,7 @@ import logging
 
 class MyControllerMap:
     def __init__(self):
-        self.button = {'A': 'L', '1' : 'space'} # Fast forward (10 seg) pro Youtube
+        self.button = {'1': 'left', '2' : 'space', '3':'right'} # Fast forward (10 seg) pro Youtube
 
 class SerialControllerInterface:
     # Protocolo
