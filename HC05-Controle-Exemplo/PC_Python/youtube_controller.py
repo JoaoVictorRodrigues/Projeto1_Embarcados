@@ -4,6 +4,22 @@ import serial
 import argparse
 import time
 import logging
+from ctypes import cast, POINTER
+from comtypes import CLSCTX_ALL
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+import math
+
+# Get default audio device using PyCAW
+devices = AudioUtilities.GetSpeakers()
+interface = devices.Activate(
+    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+volume = cast(interface, POINTER(IAudioEndpointVolume))
+
+# Get current volume - volume.GetMasterVolumeLevel()
+currentVolumeDb = 0.0
+# volume.SetMasterVolumeLevel(currentVolumeDb - 6.0, None)
+# NOTE: -6.0 dB = half volume !
+
 
 class MyControllerMap:
     def __init__(self):
@@ -31,15 +47,49 @@ class SerialControllerInterface:
 
         logging.debug("Received DATA: {}".format(status))
 
-        if status == b'1':
-            logging.info("KEYDOWN A")
-            pyautogui.keyDown(self.mapping.button[id.decode()])
-        elif status == b'0':
-            logging.info("KEYUP A")
-            pyautogui.keyUp(self.mapping.button[id.decode()])
+        if id.decode() == 'v':
+            print(status)
+            print (currentVolumeDb)
+            if status == b'0':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-74.0, None)
+            if status == b'1':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-14.0, None)
+            if status == b'2':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-12.0, None)
+            if status == b'3':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-10.0, None)
+            if status == b'4':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-10.0, None)
+            if status == b'5':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-8.0, None)
+            if status == b'6':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-6.0, None)
+            if status == b'7':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-4.0, None)
+            if status == b'8':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb-2.0, None)
+            if status == b'9':
+              #vol_inten = min(1.0, max(0.0, 0.5))
+              volume.SetMasterVolumeLevel(currentVolumeDb, None)
+        else:
+            if status == b'1':
+                logging.info("KEYDOWN A")
+                pyautogui.keyDown(self.mapping.button[id.decode()])
+            elif status == b'0':
+                logging.info("KEYUP A")
+                pyautogui.keyUp(self.mapping.button[id.decode()])
 
         self.incoming = self.ser.read()
-
+  
 
 class DummyControllerInterface:
     def __init__(self):

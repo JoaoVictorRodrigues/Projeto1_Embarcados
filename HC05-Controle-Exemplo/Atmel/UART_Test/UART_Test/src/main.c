@@ -30,6 +30,8 @@
 */
 #include <asf.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 // Descomente o define abaixo, para desabilitar o Bluetooth e utilizar modo Serial via Cabo
 #define DEBUG_SERIAL
@@ -40,6 +42,10 @@
 #else
 #define UART_COMM USART0
 #endif
+
+#define AFEC_POT AFEC0
+#define AFEC_POT_ID ID_AFEC0
+#define AFEC_POT_CHANNEL 0 // Canal do pino PD30
 
 // pc30
 // #define BUT1_PIO PIOC
@@ -79,13 +85,74 @@
 void BUT1_callback(void);
 void BUT2_callback(void);
 void BUT3_callback(void);
+void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq);
+
 /************************************************************************/
 /* interrupcoes                                                         */
 /************************************************************************/
 
+/** The conversion data is done flag */
+volatile bool g_is_conversion_done = false;
+
+/** The conversion data value */
+volatile uint32_t g_ul_value = 0;
+
 volatile char BUT1_flag = 0;
 volatile char BUT2_flag = 0;
 volatile char BUT3_flag = 0;
+volatile char flag_tc = 0;
+
+/**
+* \brief AFEC interrupt callback function.
+*/
+static void AFEC_pot_Callback(void){
+	g_ul_value = afec_channel_get_value(AFEC_POT, AFEC_POT_CHANNEL);
+	g_is_conversion_done = true;
+}
+
+static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel, afec_callback_t callback){
+	/*************************************
+	* Ativa e configura AFEC
+	*************************************/
+	/* Ativa AFEC - 0 */
+	afec_enable(afec);
+
+	/* struct de configuracao do AFEC */
+	struct afec_config afec_cfg;
+
+	/* Carrega parametros padrao */
+	afec_get_config_defaults(&afec_cfg);
+
+	/* Configura AFEC */
+	afec_init(afec, &afec_cfg);
+
+	/* Configura trigger por software */
+	afec_set_trigger(afec, AFEC_TRIG_SW);
+
+	/*** Configuracao específica do canal AFEC ***/
+	struct afec_ch_config afec_ch_cfg;
+	afec_ch_get_config_defaults(&afec_ch_cfg);
+	afec_ch_cfg.gain = AFEC_GAINVALUE_0;
+	afec_ch_set_config(afec, afec_channel, &afec_ch_cfg);
+
+	/*
+	* Calibracao:
+	* Because the internal ADC offset is 0x200, it should cancel it and shift
+	down to 0.
+	*/
+	afec_channel_set_analog_offset(afec, afec_channel, 0x200);
+
+	/***  Configura sensor de temperatura ***/
+	struct afec_temp_sensor_config afec_temp_sensor_cfg;
+
+	afec_temp_sensor_get_config_defaults(&afec_temp_sensor_cfg);
+	afec_temp_sensor_set_config(afec, &afec_temp_sensor_cfg);
+	
+	/* configura IRQ */
+	afec_set_callback(afec, afec_channel,	callback, 1);
+	NVIC_SetPriority(afec_id, 4);
+	NVIC_EnableIRQ(afec_id);
+}
 
 void BUT1_callback(void){
 	if(pio_get(BUT1_PIO, PIO_INPUT, BUT1_PIO_IDX_MASK) == 0){
@@ -110,6 +177,22 @@ void BUT3_callback(void){
 		BUT3_flag = '1';
 	}
 }
+
+void TC1_Handler(void){
+	volatile uint32_t ul_dummy;
+
+	/****************************************************************
+	* Devemos indicar ao TC que a interrupção foi satisfeita.
+	******************************************************************/
+	ul_dummy = tc_get_status(TC0, 1);
+
+	/* Avoid compiler warning */
+	UNUSED(ul_dummy);
+
+	/** Muda o estado do LED */
+	flag_tc = 1;
+}
+
 
 
 volatile long g_systimer = 0;
@@ -189,7 +272,39 @@ int hc05_server_init(void) {
 }
 
 /***  Funcoes  ***/
-
+void vol_func(uint32_t g_ul_value,char *vol_char){
+	// 0 .. 9
+	if (g_ul_value<=370){
+		*vol_char = '0';
+	}
+	else if(g_ul_value<=740){
+		*vol_char = '1';
+	}
+	else if(g_ul_value<=1110){
+		*vol_char = '2';
+	}
+	else if(g_ul_value<=1480){
+		*vol_char = '3';
+	}
+	else if(g_ul_value<=1850){
+		*vol_char = '4';
+	}
+	else if(g_ul_value<=2220){
+		*vol_char = '5';
+	}
+	else if(g_ul_value<=2590){
+		*vol_char = '6';
+	}
+	else if(g_ul_value<=2960){
+		*vol_char = '7';
+	}
+	else if(g_ul_value<=3330){
+		*vol_char = '8';
+	}
+	else{
+		*vol_char = '9';
+	}
+}
 
 void init(void){
 	
@@ -233,6 +348,34 @@ void init(void){
 	pio_handler_set(BUT3_PIO, BUT3_PIO_ID, BUT3_PIO_IDX_MASK, PIO_IT_EDGE, BUT3_callback);
 	
 }
+void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq){
+	uint32_t ul_div;
+	uint32_t ul_tcclks;
+	uint32_t ul_sysclk = sysclk_get_cpu_hz();
+
+	/* Configura o PMC */
+	/* O TimerCounter é meio confuso
+	o uC possui 3 TCs, cada TC possui 3 canais
+	TC0 : ID_TC0, ID_TC1, ID_TC2
+	TC1 : ID_TC3, ID_TC4, ID_TC5
+	TC2 : ID_TC6, ID_TC7, ID_TC8
+	*/
+	pmc_enable_periph_clk(ID_TC);
+
+	/** Configura o TC para operar em  4Mhz e interrupçcão no RC compare */
+	tc_find_mck_divisor(freq, ul_sysclk, &ul_div, &ul_tcclks, ul_sysclk);
+	tc_init(TC, TC_CHANNEL, ul_tcclks | TC_CMR_CPCTRG);
+	tc_write_rc(TC, TC_CHANNEL, (ul_sysclk / ul_div) / freq);
+
+	/* Configura e ativa interrupçcão no TC canal 0 */
+	/* Interrupção no C */
+	NVIC_SetPriority(ID_TC, 4);
+	NVIC_EnableIRQ((IRQn_Type) ID_TC);
+	tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
+
+	/* Inicializa o canal 0 do TC */
+	tc_start(TC, TC_CHANNEL);
+}
 
 void send_command(char id, char status){
 	while(!usart_is_tx_ready(UART_COMM));
@@ -242,7 +385,6 @@ void send_command(char id, char status){
 	while(!usart_is_tx_ready(UART_COMM));
 	usart_write(UART_COMM, c_EOF);
 }
-
 
 int main (void){
 	
@@ -256,25 +398,53 @@ int main (void){
 	#endif
 	
 	char buffer[1024];
+	char vol_char = '0';
+	char vol_char_old = '0';
+
 	BUT1_flag = 0;
 	BUT2_flag = 0;
 	BUT3_flag = 0;
+	
+	TC_init(TC0, ID_TC1, 1, 2);
+	
+	/* inicializa e configura adc */
+	config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_Callback);
+	
+	/* Selecina canal e inicializa conversão */
+	afec_channel_enable(AFEC_POT, AFEC_POT_CHANNEL);
+	afec_start_software_conversion(AFEC_POT);
 	
 	while(1) {
 		
 		pmc_sleep(SAM_PM_SMODE_SLEEP_WFI); // Espera ate que um interrupitor ligue
 		
-		if(BUT1_flag) {
+		if (BUT1_flag) {
 			send_command(BUT1_COMMAND_ID, BUT1_flag);
 			BUT1_flag = 0;
 		}
-		if(BUT2_flag) {
+		if (BUT2_flag) {
 			send_command(BUT2_COMMAND_ID, BUT2_flag);
 			BUT2_flag = 0;
 		}
-		if(BUT3_flag) {
+		if (BUT3_flag) {
 			send_command(BUT3_COMMAND_ID, BUT3_flag);
 			BUT3_flag = 0;
+		}
+		if (flag_tc) {
+			if (g_is_conversion_done) {
+				vol_func(g_ul_value, &vol_char);
+				
+				// garante que volume só e' enviado quando for um novo valor
+				if (vol_char != vol_char_old) {
+					send_command('v', vol_char);
+				}
+				vol_char_old = vol_char;
+				
+				/* Selecina canal e inicializa conversão */
+				afec_channel_enable(AFEC_POT, AFEC_POT_CHANNEL);
+				afec_start_software_conversion(AFEC_POT);
+			}
+			flag_tc = 0;
 		}
 	}
 }
