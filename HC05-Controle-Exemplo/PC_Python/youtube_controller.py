@@ -8,6 +8,8 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 import math
+import sys
+import signal
 
 # Get default audio device using PyCAW
 devices = AudioUtilities.GetSpeakers()
@@ -35,7 +37,8 @@ class SerialControllerInterface:
         self.mapping = MyControllerMap()
         self.incoming = '0'
         pyautogui.PAUSE = 0  ## remove delay
-    
+
+
     def update(self):
         ## Sync protocol
         while self.incoming != b'X':
@@ -47,39 +50,41 @@ class SerialControllerInterface:
 
         logging.debug("Received DATA: {}".format(status))
 
-        if id.decode() == 'v':
+        if id.decode() == 'S':
+            self.ser.write(b'X')
+        elif id.decode() == 'v':
             print(status)
             print (currentVolumeDb)
             if status == b'0':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-74.0, None)
+              volume.SetMasterVolumeLevel(-74.0, None)
             if status == b'1':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-14.0, None)
+              volume.SetMasterVolumeLevel(-23.9, None)
             if status == b'2':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-12.0, None)
+              volume.SetMasterVolumeLevel(-17.9, None)
             if status == b'3':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-10.0, None)
+              volume.SetMasterVolumeLevel(-13.8, None)
             if status == b'4':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-10.0, None)
+              volume.SetMasterVolumeLevel(-10.4, None)
             if status == b'5':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-8.0, None)
+              volume.SetMasterVolumeLevel(-7.8, None)
             if status == b'6':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-6.0, None)
+              volume.SetMasterVolumeLevel(-5.4, None)
             if status == b'7':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-4.0, None)
+              volume.SetMasterVolumeLevel(-3.4, None)
             if status == b'8':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb-2.0, None)
+              volume.SetMasterVolumeLevel(-1.6, None)
             if status == b'9':
               #vol_inten = min(1.0, max(0.0, 0.5))
-              volume.SetMasterVolumeLevel(currentVolumeDb, None)
+              volume.SetMasterVolumeLevel(0.0, None)
         else:
             if status == b'1':
                 logging.info("KEYDOWN A")
@@ -102,6 +107,9 @@ class DummyControllerInterface:
         logging.info("[Dummy] Pressed A button")
         time.sleep(1)
 
+def signal_handler(sig, frame):
+    print('You pressed Ctrl+C!')
+    sys.exit(0)
 
 if __name__ == '__main__':
     interfaces = ['dummy', 'serial']
@@ -111,6 +119,7 @@ if __name__ == '__main__':
     argparse.add_argument('-c', '--controller_interface', type=str, default='serial', choices=interfaces)
     argparse.add_argument('-d', '--debug', default=False, action='store_true')
     args = argparse.parse_args()
+    signal.signal(signal.SIGINT, signal_handler)
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
 

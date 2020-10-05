@@ -58,6 +58,8 @@
 
 #define c_EOF 'X'
 
+#define VERIFICA_COMMAND_ID 'S'
+
 #define BUT1_COMMAND_ID '1'
 #define BUT1_PIO		   PIOD
 #define BUT1_PIO_ID		   ID_PIOD
@@ -76,6 +78,24 @@
 #define BUT3_PIO_ID ID_PIOA
 #define BUT3_PIO_IDX 19
 #define BUT3_PIO_IDX_MASK (1u << BUT3_PIO_IDX)
+
+// LED1
+#define LED1_PIO      PIOA
+#define LED1_PIO_ID   ID_PIOA
+#define LED1_IDX      0
+#define LED1_IDX_MASK (1 << LED1_IDX)
+
+// LED2
+#define LED2_PIO      PIOC
+#define LED2_PIO_ID   ID_PIOC
+#define LED2_IDX      30
+#define LED2_IDX_MASK (1 << LED2_IDX)
+
+// LED3
+#define LED3_PIO      PIOB
+#define LED3_PIO_ID   ID_PIOB
+#define LED3_IDX      2
+#define LED3_IDX_MASK (1 << LED3_IDX)
 
 //Prioridade dos Botoes
 #define BUT1_PRIOR 5 //Prioridade botao XOLED1
@@ -272,6 +292,19 @@ int hc05_server_init(void) {
 }
 
 /***  Funcoes  ***/
+
+int response(){
+	uint32_t resp = 0;
+	if (!usart_read(UART_COMM, &resp));
+	{
+		if (resp=='X')
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
 void vol_func(uint32_t g_ul_value,char *vol_char){
 	// 0 .. 9
 	if (g_ul_value<=370){
@@ -306,13 +339,23 @@ void vol_func(uint32_t g_ul_value,char *vol_char){
 	}
 }
 
+/**
+* @Brief Inicializa o pino do LED
+*/
+void LED1_init(int estado){
+	pmc_enable_periph_clk(LED1_PIO_ID);
+	pio_set_output(LED1_PIO, LED1_IDX_MASK, estado, 0, 0 );
+};
+
 void init(void){
 	
+	LED1_init(1);
 	board_init();
 	sysclk_init();
 	delay_init();
 	SysTick_Config(sysclk_get_cpu_hz() / 1000); // 1 ms
 	config_console();
+	
 	
 	// Desativa WatchDog Timer
 	WDT->WDT_MR = WDT_MR_WDDIS;
@@ -346,6 +389,15 @@ void init(void){
 	pio_handler_set(BUT1_PIO, BUT1_PIO_ID, BUT1_PIO_IDX_MASK, PIO_IT_EDGE, BUT1_callback);
 	pio_handler_set(BUT2_PIO, BUT2_PIO_ID, BUT2_PIO_IDX_MASK, PIO_IT_EDGE, BUT2_callback);
 	pio_handler_set(BUT3_PIO, BUT3_PIO_ID, BUT3_PIO_IDX_MASK, PIO_IT_EDGE, BUT3_callback);
+	
+	TC_init(TC0, ID_TC1, 1, 2);
+	
+	/* inicializa e configura adc */
+	config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_Callback);
+	
+	/* Selecina canal e inicializa conversão */
+	afec_channel_enable(AFEC_POT, AFEC_POT_CHANNEL);
+	afec_start_software_conversion(AFEC_POT);
 	
 }
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq){
@@ -405,18 +457,24 @@ int main (void){
 	BUT2_flag = 0;
 	BUT3_flag = 0;
 	
-	TC_init(TC0, ID_TC1, 1, 2);
+	uint32_t resposta = 0;
+	int mandou = 0;
 	
-	/* inicializa e configura adc */
-	config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_Callback);
-	
-	/* Selecina canal e inicializa conversão */
-	afec_channel_enable(AFEC_POT, AFEC_POT_CHANNEL);
-	afec_start_software_conversion(AFEC_POT);
 	
 	while(1) {
-		
 		pmc_sleep(SAM_PM_SMODE_SLEEP_WFI); // Espera ate que um interrupitor ligue
+		
+		if (flag_tc)
+		{
+			send_command(VERIFICA_COMMAND_ID, '0');
+			delay_ms(100);
+			if (response())
+			{
+				pio_clear(LED1_PIO,LED1_IDX_MASK);
+				}else{
+				pio_set(LED1_PIO,LED1_IDX_MASK);
+			}
+		}
 		
 		if (BUT1_flag) {
 			send_command(BUT1_COMMAND_ID, BUT1_flag);
